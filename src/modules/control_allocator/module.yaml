@@ -538,7 +538,59 @@ parameters:
                 0: Ignore
                 1: Remove first failed motor from effectiveness
             default: 0
-
+        CA_SV_TM_COUNT:
+            description:
+                short: Total number of Tilt Servos
+            type: enum
+            values:
+                0: '0'
+                1: '1'
+                2: '2'
+                3: '3'
+                4: '4'
+            default: 0
+        CA_SV_TM${i}_MINA:
+            description:
+                short: Tilt Servo ${i} Tilt Angle at Minimum
+                long: |
+                  Defines the tilt angle when the servo is at the minimum.
+                  An angle of zero means upwards.
+            type: float
+            decimal: 0
+            unit: 'deg'
+            num_instances: *max_num_tilts
+            instance_start: 0
+            min: -90.0
+            max: 90.0
+            default: 0.0
+        CA_SV_TM${i}_MAXA:
+            description:
+                short: Tilt Servo ${i} Tilt Angle at Maximum
+                long: |
+                  Defines the tilt angle when the servo is at the maximum.
+                  An angle of zero means upwards.
+            type: float
+            decimal: 0
+            unit: 'deg'
+            num_instances: *max_num_tilts
+            instance_start: 0
+            min: -90.0
+            max: 90.0
+            default: 90.0
+        CA_SV_TM${i}_TD:
+            description:
+                short: Tilt Servo ${i} Tilt Direction
+                long: |
+                  Defines the direction the servo tilts towards when moving towards the maximum tilt angle.
+            type: enum
+            values:
+                0: 'Positive'
+                90: 'Negative'
+            min: 0
+            max: 359
+            num_instances: *max_num_tilts
+            instance_start: 0
+            default: 0
 # Mixer
 mixer:
     actuator_types:

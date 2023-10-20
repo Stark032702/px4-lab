@@ -62,7 +62,7 @@ px4_add_library(ActuatorEffectiveness
 	ActuatorEffectivenessRoverAckermann.cpp
 	ActuatorEffectivenessRoverDifferential.hpp
 	ActuatorEffectivenessRoverDifferential.cpp
-)
+	)
 
 target_compile_options(ActuatorEffectiveness PRIVATE ${MAX_CUSTOM_OPT_LEVEL})
 target_include_directories(ActuatorEffectiveness PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
