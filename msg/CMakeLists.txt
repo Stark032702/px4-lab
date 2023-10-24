@@ -229,6 +229,7 @@ set(msg_files
 	YawEstimatorStatus.msg
 	pidvalues.msg
 	adaptivecontrollambda.msg
+	ActuatorSetpoint.msg
 
 )
 list(SORT msg_files)

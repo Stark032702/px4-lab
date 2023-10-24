@@ -25,7 +25,7 @@
 #
 
 param set-default SYS_CTRL_ALLOC 1 #dynamic allocation
-param set-default CA_AIRFRAME 23 #Tilting Multirotor
+param set-default CA_AIRFRAME 12 #Tilting Multirotor
 
 . ${R}etc/init.d/rc.mc_defaults
 param set-default COM_FLTMODE1 8

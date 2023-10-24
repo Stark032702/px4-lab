@@ -130,6 +130,8 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic("vtol_vehicle_status", 200);
 	add_topic("wind", 1000);
 	add_topic("pid_values", 20);
+	add_topic("adaptive_lambda", 20);
+	add_topic("actuator_setpoint");
 
 	// multi topics
 	add_optional_topic_multi("actuator_outputs", 100, 3);

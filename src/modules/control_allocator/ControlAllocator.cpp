@@ -40,6 +40,7 @@
  */
 
 #include "ControlAllocator.hpp"
+#include "ActuatorEffectiveness/ActuatorEffectivenessTiltMultirotor.hpp"
 
 #include <drivers/drv_hrt.h>
 #include <circuit_breaker/circuit_breaker.h>
@@ -264,6 +265,9 @@ ControlAllocator::update_effectiveness_source()
 
 		case EffectivenessSource::HELICOPTER_TAIL_SERVO:
 			tmp = new ActuatorEffectivenessHelicopter(this, ActuatorType::SERVOS);
+			break;
+		case EffectivenessSource::TILTMULTIROTOR:
+			tmp = new ActuatorEffectivenessTiltMultirotor(this);
 			break;
 
 		default:

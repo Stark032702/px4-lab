@@ -157,6 +157,7 @@ private:
 		CUSTOM = 9,
 		HELICOPTER_TAIL_ESC = 10,
 		HELICOPTER_TAIL_SERVO = 11,
+		TILTMULTIROTOR = 12
 	};
 
 	enum class FailureMode {

@@ -72,6 +72,13 @@ Vector3f RateControl::update(const Vector3f &rate, const Vector3f &rate_sp, cons
 			     const float dt, const bool landed)
 {
 	_rc_channel_sub.copy(&_rc_channel_values);
+	if (alternator){
+			update_lambda(angular_accel(0), angular_accel(1), angular_accel(2));
+			alternator = false;
+		}
+		else{
+			alternator = true;
+		}
 	if (_rc_channel_values.channels[4] > -1.0f){
 
 		return update_mfc(rate, rate_sp, angular_accel, dt, landed);
@@ -326,7 +333,7 @@ float RateControl::sum(float* input){
 	return total;
 }
 
-void scaler_multiplication(float* interval, float scaler_val){
+void RateControl::scaler_multiplication(float* interval, float scaler_val){
 
 	float interval_copy[2] = {interval[0], interval[1]};
 
@@ -340,7 +347,7 @@ void scaler_multiplication(float* interval, float scaler_val){
 	}
 }
 
-float max_value(float* input_array){
+float RateControl::max_value(float* input_array){
 
 	float max_value = input_array[0];
 	for (int i = 0; i < 4; i++){
@@ -351,7 +358,7 @@ float max_value(float* input_array){
 	return max_value;
 }
 
-float min_value(float* input_array){
+float RateControl::min_value(float* input_array){
 
 	float min_value = input_array[0];
 	for (int i = 0; i < 4; i++){
@@ -362,7 +369,7 @@ float min_value(float* input_array){
 	return min_value;
 }
 
-void interval_multiplication(float* interval1, float* interval2, float* outputinterval){
+void RateControl::interval_multiplication(float* interval1, float* interval2, float* outputinterval){
 
 	float multiplication_list[4] = {interval1[0] * interval2[0], interval1[0] * interval2[1], interval1[1] * interval2[0], interval1[1] * interval2[1]};
 
@@ -371,21 +378,130 @@ void interval_multiplication(float* interval1, float* interval2, float* outputin
 
 }
 
-void interval_addition(float* interval1, float* interval2, float* outputinterval){
+void RateControl::interval_addition(float* interval1, float* interval2, float* outputinterval){
 
-	outputinterval[0] = [interval1[0] + interval2[0]]; // , interval1[1] + interval2[1]];
+	outputinterval[0] = interval1[0] + interval2[0];
+	outputinterval[1] = interval1[1] + interval2[1];
 
 }
 
-void interval_subtraction(float* interval1, float* interval2, float* outputinterval){
+void RateControl::interval_subtraction(float* interval1, float* interval2, float* outputinterval){
 
-	//outputinterval[0] = [interval1[0] - interval2[0], interval1[1] - interval2[1]];
+	outputinterval[0] = interval1[0] - interval2[1];
+	outputinterval[1] = interval1[1] - interval2[0];
 }
 
-void interval_union(float* interval1, float* interval2, float* outputinterval){
+void RateControl::interval_union(float* interval1, float* interval2, float* outputinterval){
 
-	//outputinterval[0] = math::max(interval1[0], interval2[0]);
-	//outputinterval[1] = math::min(interval1[1], interval2[1]);
+	outputinterval[0] = math::max(interval1[0], interval2[0]);
+	outputinterval[1] = math::min(interval1[1], interval2[1]);
+}
+
+float RateControl::interval_mid_value(float* interval){
+
+	return (interval[0] + interval[1]) / 2.0f;
+
+}
+
+void RateControl::update_lambda(float roll_accl, float pitch_accl, float yaw_accl){
+
+	_vehicle_position_sub.copy(&_local_position_values);
+	_actuator_output_sub.copy(&_actuator_output_values);
+
+	float* old_lambda_2 = _lambda_2;
+	float* old_lambda_3 = _lambda_3;
+	float* old_lambda_4 = _lambda_4;
+
+	float lambda_1_temp[2] = {0.0f};
+	float lambda_2_temp[2] = {0.0f};
+	float lambda_3_temp[2] = {0.0f};
+	float lambda_4_temp[2] = {0.0f};
+
+
+	float z_accl = _local_position_values.az;
+	float* actuator_output_array = _actuator_output_values.output;
+
+	float temp_interval[2] = {0.0f};
+	float constant;
+
+	scaler_multiplication(old_lambda_2, float(pow(actuator_output_array[1], 2)));
+	scaler_multiplication(old_lambda_3, float(pow(actuator_output_array[2], 2)));
+	scaler_multiplication(old_lambda_4, float(pow(actuator_output_array[3], 2)));
+
+	// equation 1
+	constant = _mass * z_accl/(_ct * float(pow(actuator_output_array[0], 2)));
+	float mzaccel[2] = {constant, constant};  // constant interval
+	interval_addition(old_lambda_2, old_lambda_3, temp_interval);
+	interval_addition(temp_interval, old_lambda_4, lambda_1_temp);
+
+	scaler_multiplication(lambda_1_temp, 1.0f / float(pow(actuator_output_array[0], 2)));
+
+	interval_subtraction(mzaccel, lambda_1_temp, lambda_1_temp);
+
+	interval_union(_lambda_1, lambda_1_temp, _lambda_1);
+
+	float* old_lambda_1 = _lambda_1;  // update lambda values
+	scaler_multiplication(old_lambda_1, float(pow(actuator_output_array[0], 2)));
+
+	// euqation 2
+	constant = _jxy * roll_accl / (_root2over2dct * float(pow(actuator_output_array[1], 2)));
+	float jxpdot[2] = {constant, constant};  // constant interval
+	scaler_multiplication(old_lambda_1, -1.0f);
+	interval_addition(old_lambda_1, old_lambda_3, temp_interval);
+	interval_addition(temp_interval, old_lambda_4, lambda_2_temp);
+
+	scaler_multiplication(lambda_2_temp, 1.0f / float(pow(actuator_output_array[1], 2)));
+
+	interval_addition(jxpdot, lambda_2_temp, lambda_2_temp);
+
+	interval_union(_lambda_2, lambda_2_temp, _lambda_2);
+
+	old_lambda_2 = _lambda_2;
+	scaler_multiplication(old_lambda_2, float(pow(actuator_output_array[1], 2)));
+	old_lambda_1 = _lambda_1;  // reset lambda 1
+	scaler_multiplication(old_lambda_1, float(pow(actuator_output_array[0], 2)));
+
+	// equaiton 3
+	constant = _jxy * pitch_accl / (_root2over2dct * float(pow(actuator_output_array[1], 2)));
+	jxpdot[0] = constant;
+	jxpdot[1] = constant;  // constant interval
+	scaler_multiplication(old_lambda_2, -1.0f);
+	interval_addition(old_lambda_1, old_lambda_2, temp_interval);
+	interval_addition(temp_interval, old_lambda_4, lambda_3_temp);
+
+	scaler_multiplication(lambda_3_temp, 1.0f / float(pow(actuator_output_array[2], 2)));
+
+	interval_addition(jxpdot, lambda_3_temp, lambda_3_temp);
+
+	interval_union(_lambda_3, lambda_3_temp, _lambda_3);
+
+	old_lambda_3 = _lambda_3;
+	scaler_multiplication(old_lambda_3, float(pow(actuator_output_array[2], 2)));
+	old_lambda_2 = _lambda_2;  // reset lambda 2
+	scaler_multiplication(old_lambda_2, float(pow(actuator_output_array[1], 2)));
+
+	//equation 4
+	constant = _jz * yaw_accl / (_cm * float(pow(actuator_output_array[3], 2)));
+	scaler_multiplication(old_lambda_2, -1.0f);
+	interval_addition(old_lambda_1, old_lambda_2, temp_interval);
+	interval_addition(temp_interval, old_lambda_3, lambda_4_temp);
+
+	scaler_multiplication(lambda_4_temp, 1.0f / float(pow(actuator_output_array[3], 2)));
+
+	interval_addition(jxpdot, lambda_4_temp, lambda_4_temp);
+
+	interval_union(_lambda_4, lambda_4_temp, _lambda_4);
+
+	// publish the data to lambda uorb topic
+	adaptivecontrollambda_s lambda_values_storage;
+
+	lambda_values_storage.lambda_1 = interval_mid_value(_lambda_1);
+	lambda_values_storage.lambda_2 = interval_mid_value(_lambda_2);
+	lambda_values_storage.lambda_3 = interval_mid_value(_lambda_3);
+	lambda_values_storage.lambda_4 = interval_mid_value(_lambda_4);
+
+	_adaptive_control_pub.publish(lambda_values_storage);
+
 }
 
 void RateControl::updateIntegral(Vector3f &rate_error, const float dt)

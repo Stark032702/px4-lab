@@ -47,6 +47,9 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/pidvalues.h>
 #include <uORB/topics/rc_channels.h>
+#include <uORB/topics/adaptivecontrollambda.h>
+#include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/actuator_outputs.h>
 #include <px4_platform_common/module_params.h>
 #include <uORB/topics/parameter_update.h>
 
@@ -123,8 +126,12 @@ public:
 	void interval_union(float* interval1, float* interval2, float* outputinterval);
 	float max_value(float* input_array);
 	float min_value(float* input_array);
+	void update_lambda(float roll_accl, float pitch_accl, float yaw_accl);
+	float interval_mid_value(float* interval);
 
 	uORB::Subscription _rc_channel_sub{ORB_ID(rc_channels)};
+	uORB::Subscription _vehicle_position_sub{ORB_ID(vehicle_local_position)};	// vehicle z acceleration data for adaptive control
+	uORB::Subscription _actuator_output_sub{ORB_ID(actuator_outputs)};	// subscribe to the pwm values for motors
 
 	/**
 	 * Set the integral term to 0 to prevent windup
@@ -167,7 +174,8 @@ private:
 	matrix::Vector<bool, 3> _control_allocator_saturation_negative;
 	matrix::Vector<bool, 3> _control_allocator_saturation_positive;
 
-	uORB::Publication<pidvalues_s>     _pid_values_pub{ORB_ID(pid_values)};
+	uORB::Publication<pidvalues_s>     		_pid_values_pub{ORB_ID(pid_values)};
+	uORB::Publication<adaptivecontrollambda_s>	_adaptive_control_pub{ORB_ID(adaptive_lambda)}; //lambda values for adaptive control
 	matrix::Vector3f _mfc_gain_p;
 	matrix::Vector3f _mfc_gain_i;
 	matrix::Vector3f _mfc_gain_d;
@@ -177,7 +185,7 @@ private:
 	matrix::Vector2f _f_hat;
 	matrix::Vector3f _sp_double_der;
 	rc_channels_s _rc_channel_values;
-	float _lambda;
+	float _lambda;  // for mfc
 	float _gain_sp;
 	float _gain_f_hat;
 	int _mfc_n;
@@ -191,4 +199,20 @@ private:
 	float _pitch_sp_values[22] = {0.0f};
 	float _roll_rate_values[22] = {0.0f};
 	float _pitch_rate_values[22] = {0.0f};
+
+	// THRUST LOSS PARAETERS
+	float _mass = 1.2f; //mass of the drone change it to parameter later
+	float _ct = 1.938e-6f; // thrust coefficient
+	float _cm = 1.796e-8;  // motor moment coefficient
+	float _d = 0.13f; //distance from center to each propeller
+	float _root2over2dct = (float(sqrt(2.0))/2.0f) * _d * _ct;
+	float _jxy = 0.0133f; // inertia in x and y axis
+	float _jz = 0.02587f; // inertia in yaw
+	float _lambda_1[2] = {0.5f, 1.0f};  // starting lambda intervals
+	float _lambda_2[2] = {0.5f, 1.0f};
+	float _lambda_3[2] = {0.5f, 1.0f};
+	float _lambda_4[2] = {0.5f, 1.0f};
+	bool alternator = true;
+	actuator_outputs_s _actuator_output_values;
+	vehicle_local_position_s _local_position_values;
 };
