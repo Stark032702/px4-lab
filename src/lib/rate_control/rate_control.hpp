@@ -38,7 +38,6 @@
  */
 
 #pragma once
-
 #include <matrix/matrix/math.hpp>
 
 #include <mathlib/mathlib.h>
@@ -119,19 +118,28 @@ public:
 	void push(float* input, float value);
 	void push_pop_time(float* input, float value);
 	float sum(float* input);
-	void scaler_multiplication(float* interval, float scaler_val);
-	void interval_multiplication(float* interval1, float* interval2, float* outputinterval);
-	void interval_addition(float* interval1, float* interval2, float* outputinterval);
-	void interval_subtraction(float* interval1, float* interval2, float* outputinterval);
-	void interval_union(float* interval1, float* interval2, float* outputinterval);
-	float max_value(float* input_array);
-	float min_value(float* input_array);
+	void scaler_multiplication(const float interval[], float scaler_val, float* output_interval);
+	void interval_multiplication(float interval1[], float interval2[], float* outputinterval);
+	void interval_addition(float interval1[], float interval2[], float* outputinterval);
+	void interval_subtraction(float interval1[], float interval2[], float* outputinterval);
+	void interval_intersection(const float interval1[], float interval2[], float* outputinterval);
+	void interval_division(const float interval1[], float interval2[], float* outputinterval);
+	float max_value(float input_array[]);
+	float min_value(float input_array[]);
 	void update_lambda(float roll_accl, float pitch_accl, float yaw_accl);
-	float interval_mid_value(float* interval);
+	float interval_mid_value(float interval[]);
+	void pop_editable(float* input, int n);
+	void push_editable(float* input, float value, int n);
+	float sum_editable(float* input, int n);
+	void interval_eq1(const float l1[], const float l2[], const float l3[], const float l4[], float actuator_output_array[], float z_accl);
+	void interval_eq2(const float l1[], const float l2[], const float l3[], const float l4[], float actuator_output_array[], float roll_accl);
+	void interval_eq3(const float l1[], const float l2[], const float l3[], const float l4[], float actuator_output_array[], float pitch_accl);
+	void interval_eq4(const float l1[], const float l2[], const float l3[], const float l4[], float actuator_output_array[], float yaw_accl);
+	void python_implementation(const float l1[], const float l2[], const float l3[], const float l4[], float actuator_output_array[], float z_accl, float roll_accl, float pitch_accl, float yaw_accl);
 
 	uORB::Subscription _rc_channel_sub{ORB_ID(rc_channels)};
 	uORB::Subscription _vehicle_position_sub{ORB_ID(vehicle_local_position)};	// vehicle z acceleration data for adaptive control
-	uORB::Subscription _actuator_output_sub{ORB_ID(actuator_outputs)};	// subscribe to the pwm values for motors
+	uORB::Subscription _actuator_output_sub{ORB_ID(actuator_outputs)};	// subscribe to the pwm values for motors  actuator_outputs_sim
 
 	/**
 	 * Set the integral term to 0 to prevent windup
@@ -203,16 +211,36 @@ private:
 	// THRUST LOSS PARAETERS
 	float _mass = 1.2f; //mass of the drone change it to parameter later
 	float _ct = 1.938e-6f; // thrust coefficient
-	float _cm = 1.796e-8;  // motor moment coefficient
+	float _cm = 1.796e-6f;  // motor moment coefficient
 	float _d = 0.13f; //distance from center to each propeller
 	float _root2over2dct = (float(sqrt(2.0))/2.0f) * _d * _ct;
 	float _jxy = 0.0133f; // inertia in x and y axis
 	float _jz = 0.02587f; // inertia in yaw
-	float _lambda_1[2] = {0.5f, 1.0f};  // starting lambda intervals
-	float _lambda_2[2] = {0.5f, 1.0f};
-	float _lambda_3[2] = {0.5f, 1.0f};
-	float _lambda_4[2] = {0.5f, 1.0f};
-	bool alternator = true;
+	float _eq1_const = 6.6797e5f;  // found using pwm and acceleration data
+	float _eq2_const = 191.6549f;
+	float _eq3_const = 1.3215e3f;
+	float _eq4_const = 185.1139f;
+	float _acc_z_values[80] = {0.0f};
+	float _acc_roll_values[80] = {0.0f};
+	float _acc_pitch_values[80] = {0.0f};
+	float _acc_yaw_values[80] = {0.0f};
+	float _actuator_1[80] = {0.0f};
+	float _actuator_2[80] = {0.0f};
+	float _actuator_3[80] = {0.0f};
+	float _actuator_4[80] = {0.0f};
+	float _lambda_1_old = 0.0f;
+	float _lambda_2_old = 0.0f;
+	float _lambda_3_old = 0.0f;
+	float _lambda_4_old = 0.0f;
+	float _old_z_accl = 0.0f;
+	float _old_roll_accl = 0.0f;
+	float _old_pitch_accl = 0.0f;
+	float _old_yaw_accl = 0.0f;
+	float _lambda_1[2] = {0.9f, 1.1f};  // starting lambda intervals
+	float _lambda_2[2] = {0.9f, 1.1f};
+	float _lambda_3[2] = {0.9f, 1.1f};
+	float _lambda_4[2] = {0.9f, 1.1f};
+	int stepper = 1;
 	actuator_outputs_s _actuator_output_values;
 	vehicle_local_position_s _local_position_values;
 };
