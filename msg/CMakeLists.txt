@@ -227,7 +227,7 @@ set(msg_files
 	VtolVehicleStatus.msg
 	Wind.msg
 	YawEstimatorStatus.msg
-	pidvalues.msg
+	PidValues.msg
 	adaptivecontrollambda.msg
 	ActuatorSetpoint.msg
 

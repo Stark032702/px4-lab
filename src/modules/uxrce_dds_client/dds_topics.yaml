@@ -47,6 +47,12 @@ publications:
   - topic: /fmu/out/vehicle_trajectory_waypoint_desired
     type: px4_msgs::msg::VehicleTrajectoryWaypoint
 
+  - topic: /fmu/out/pid_values
+    type: px4_msgs::msg::PidValues
+
+  - topic: /fmu/out/control_allocator_status
+    type: px4_msgs::msg::ControlAllocatorStatus
+    
 subscriptions:
 
   - topic: /fmu/in/offboard_control_mode

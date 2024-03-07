@@ -48,7 +48,7 @@
 #include <uORB/topics/rc_channels.h>
 #include <uORB/topics/adaptivecontrollambda.h>
 #include <uORB/topics/vehicle_local_position.h>
-#include <uORB/topics/actuator_outputs.h>
+#include <uORB/topics/esc_status.h>
 #include <px4_platform_common/module_params.h>
 #include <uORB/topics/parameter_update.h>
 
@@ -108,11 +108,15 @@ public:
 	matrix::Vector3f update_mfc(const matrix::Vector3f &rate, const matrix::Vector3f &rate_sp,
 				const matrix::Vector3f &angular_accel, const float dt, const bool landed);
 
-	float F_hat(float x, bool y, bool z, float _f1_measurement, float _last_f1_u);
+	float F_hat(float x, float _f1_measurement, float _last_f1_u);
 
-    	float F_hat_F(bool y, bool z, float* _f_measurement, float* _last_f_u);
+    	float F_hat_simpson(float* _f_measurement, float* _last_f_u, float dt);
 
-	void setMFCGains(const matrix::Vector3f &P, const matrix::Vector3f &I, const matrix::Vector3f &D, const float &Fhat_gain, const float &SP_der_gain, const float &Lambda, const float &n);
+	void setMFCGains(const matrix::Vector3f &P, const matrix::Vector3f &I, const matrix::Vector3f &D, const float &time_window, const float &SP_der_gain, const float &Lambda, const float &n);
+
+	float lowpass_filter(float dt, float cutoff_freq);  // lowpass filter taken from ardupilot
+
+	float sp_double_dot(float* old_setpoints);
 
 	void pop(float* input);
 	void push(float* input, float value);
@@ -139,7 +143,7 @@ public:
 
 	uORB::Subscription _rc_channel_sub{ORB_ID(rc_channels)};
 	uORB::Subscription _vehicle_position_sub{ORB_ID(vehicle_local_position)};	// vehicle z acceleration data for adaptive control
-	uORB::Subscription _actuator_output_sub{ORB_ID(actuator_outputs)};	// subscribe to the pwm values for motors  actuator_outputs_sim
+	//uORB::Subscription _actuator_output_sub{ORB_ID(esc_status)};	// subscribe to the RPM values for motors  esc_status actuator_outputs_sim
 
 	/**
 	 * Set the integral term to 0 to prevent windup
@@ -192,6 +196,7 @@ private:
 	matrix::Vector3f _measurement;
 	matrix::Vector2f _f_hat;
 	matrix::Vector3f _sp_double_der;
+	matrix::Vector3f _last_accel_values;	 // used to calculate secode derivative of setpoint
 	rc_channels_s _rc_channel_values;
 	float _lambda;  // for mfc
 	float _gain_sp;
@@ -200,13 +205,14 @@ private:
 	float _mfc_dt;
 	float _F_hat_calc;
 	float _total_time;
-	float _time_steps[22] = {0.0f};
-	float _roll_last_u[22] = {0.0f};
-	float _pitch_last_u[22] = {0.0f};
-	float _roll_sp_values[22] = {0.0f};
-	float _pitch_sp_values[22] = {0.0f};
-	float _roll_rate_values[22] = {0.0f};
-	float _pitch_rate_values[22] = {0.0f};
+	float _time_steps[100] = {0.0f};
+	float _window_size; //_mfc_n / 800.0f; // gives the moving window size
+	float _roll_last_u[100] = {0.0f};
+	float _pitch_last_u[100] = {0.0f};
+	float _roll_sp_values[100] = {0.0f};
+	float _pitch_sp_values[100] = {0.0f};
+	float _roll_rate_values[100] = {0.0f};
+	float _pitch_rate_values[100] = {0.0f};
 
 	// THRUST LOSS PARAETERS
 	float _mass = 1.2f; //mass of the drone change it to parameter later
@@ -216,18 +222,18 @@ private:
 	float _root2over2dct = (float(sqrt(2.0))/2.0f) * _d * _ct;
 	float _jxy = 0.0133f; // inertia in x and y axis
 	float _jz = 0.02587f; // inertia in yaw
-	float _eq1_const = 6.6797e5f;  // found using pwm and acceleration data
-	float _eq2_const = 191.6549f;
-	float _eq3_const = 1.3215e3f;
-	float _eq4_const = 185.1139f;
-	float _acc_z_values[80] = {0.0f};
-	float _acc_roll_values[80] = {0.0f};
-	float _acc_pitch_values[80] = {0.0f};
-	float _acc_yaw_values[80] = {0.0f};
-	float _actuator_1[80] = {0.0f};
-	float _actuator_2[80] = {0.0f};
-	float _actuator_3[80] = {0.0f};
-	float _actuator_4[80] = {0.0f};
+	float _eq1_const = 4.004e7;  // found using pwm and acceleration data
+	float _eq2_const = 1.6939e6;
+	float _eq3_const = -2.366e6;
+	float _eq4_const = -1.1384e6;
+	float _acc_z_values[8] = {0.0f};
+	float _acc_roll_values[8] = {0.0f};
+	float _acc_pitch_values[8] = {0.0f};
+	float _acc_yaw_values[8] = {0.0f};
+	float _actuator_1[4] = {0.0f};
+	float _actuator_2[4] = {0.0f};
+	float _actuator_3[4] = {0.0f};
+	float _actuator_4[4] = {0.0f};
 	float _lambda_1_old = 0.0f;
 	float _lambda_2_old = 0.0f;
 	float _lambda_3_old = 0.0f;
@@ -241,6 +247,6 @@ private:
 	float _lambda_3[2] = {0.9f, 1.1f};
 	float _lambda_4[2] = {0.9f, 1.1f};
 	int stepper = 1;
-	actuator_outputs_s _actuator_output_values;
+	//esc_status_s _actuator_output_values;  // RPM values of the motors
 	vehicle_local_position_s _local_position_values;
 };

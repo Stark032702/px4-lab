@@ -73,27 +73,18 @@ Vector3f RateControl::update(const Vector3f &rate, const Vector3f &rate_sp, cons
 {
 	_rc_channel_sub.copy(&_rc_channel_values);
 	_vehicle_position_sub.copy(&_local_position_values);
-	_actuator_output_sub.update(&_actuator_output_values);
 	float z_accl = _local_position_values.az;
 
 	pop_editable(_acc_z_values, 80);
 	pop_editable(_acc_roll_values, 80);
 	pop_editable(_acc_pitch_values, 80);
 	pop_editable(_acc_yaw_values, 80);
-	pop_editable(_actuator_1, 80);
-	pop_editable(_actuator_2, 80);
-	pop_editable(_actuator_3, 80);
-	pop_editable(_actuator_4, 80);
 	push_editable(_acc_z_values, z_accl, 80);
 	push_editable(_acc_roll_values, angular_accel(0), 80);
 	push_editable(_acc_pitch_values, angular_accel(1), 80);
 	push_editable(_acc_yaw_values, angular_accel(2), 80);
-	push_editable(_actuator_1, _actuator_output_values.output[0], 80);
-	push_editable(_actuator_2, _actuator_output_values.output[1], 80);
-	push_editable(_actuator_3, _actuator_output_values.output[2], 80);
-	push_editable(_actuator_4, _actuator_output_values.output[3], 80);
 
-	if (stepper % 80 == 0 && !landed){
+	if (stepper % 1 == 0 && !landed){
 			update_lambda(angular_accel(0), angular_accel(1), angular_accel(2));
 			stepper = 1;
 
@@ -164,15 +155,15 @@ Vector3f RateControl::update(const Vector3f &rate, const Vector3f &rate_sp, cons
 
 // MFC Functions
 
-void RateControl::setMFCGains(const matrix::Vector3f &P, const matrix::Vector3f &I, const matrix::Vector3f &D, const float &Fhat_gain, const float &SP_der_gain, const float &Lambda, const float &n){
+void RateControl::setMFCGains(const matrix::Vector3f &P, const matrix::Vector3f &I, const matrix::Vector3f &D, const float &time_window, const float &SP_der_gain, const float &Lambda, const float &n){
 
 	_mfc_gain_p = P;
 	_mfc_gain_i = I;
 	_mfc_gain_d = D;
-	_gain_f_hat = Fhat_gain;
 	_gain_sp = SP_der_gain;
 	_lambda = Lambda;
 	_mfc_n = n;
+	_window_size = time_window;
 
 }
 
@@ -198,23 +189,29 @@ Vector3f RateControl::update_mfc(const Vector3f &rate, const Vector3f &rate_sp, 
 	push_pop_time(_time_steps, dt);
 	push(_roll_last_u, _last_u(0));
 	push(_pitch_last_u, _last_u(1));
-	push(_roll_sp_values, rate_sp(0));
-	push(_pitch_sp_values, rate_sp(1));
+	push(_roll_sp_values, rate_sp(0) * 20.0f);
+	push(_pitch_sp_values, rate_sp(1) * 20.0f);
 	push(_roll_rate_values, rate(0));
 	push(_pitch_rate_values, rate(1));
 	// update integral only if we are not landed
 	if (!landed) {
 		updateIntegral(rate_error, dt);
-		_sp_double_der(0) = F_hat_F(false, true, _roll_sp_values, _roll_last_u) *  _gain_sp;
-		_sp_double_der(1) = F_hat_F(false, true, _pitch_sp_values, _pitch_last_u) * _gain_sp;
-		_f_hat(0) = F_hat_F(false, false, _roll_rate_values,_roll_last_u) * _gain_f_hat;
-		_f_hat(1) = F_hat_F(false, false,  _pitch_rate_values, _pitch_last_u) * _gain_f_hat;
+
+		//float roll_sp_dd = (angular_accel(0) - _last_accel_values(0)) / dt;
+		//float pitch_sp_dd = (angular_accel(1) - _last_accel_values(1)) / dt;
+		_sp_double_der(0) = sp_double_dot(_roll_sp_values); //lowpass_filter(dt, 20.0f) * (sp_double_dot(_roll_sp_values) - _sp_double_der(0)); //+= lowpass_filter(dt, 20.0f) * (roll_sp_dd - _sp_double_der(0));
+		_sp_double_der(1) = sp_double_dot(_pitch_sp_values); //lowpass_filter(dt, 20.0f) * (sp_double_dot(_pitch_sp_values) - _sp_double_der(1)); //+= lowpass_filter(dt, 20.0f) * (pitch_sp_dd - _sp_double_der(1));
+		_f_hat(0) = (_f_hat(0) + lowpass_filter(dt, 5.0f) * math::constrain(F_hat_simpson(_roll_rate_values, _roll_last_u, dt), -.9f * _lambda, .9f *  _lambda)) / 2.0f;   //F_hat_simpson(_roll_rate_values, _roll_last_u);
+		_f_hat(1) = (_f_hat(1) + lowpass_filter(dt, 5.0f) * math::constrain(F_hat_simpson(_pitch_rate_values, _pitch_last_u, dt), -.9f * _lambda, .9f * _lambda)) / 2.0f; //F_hat_simpson(_pitch_rate_values, _pitch_last_u);
 		torque =  p_values + _rate_int - d_values + _gain_ff.emult(rate_sp);
-		_current_u(0) = ((_sp_double_der(0) + torque(0) - _f_hat(0)) / _lambda);
-		_current_u(1) = ((_sp_double_der(1) + torque(1) - _f_hat(1)) / _lambda);
+		_current_u(0) = ((_sp_double_der(0) - _f_hat(0)) / (_lambda)) + torque(0);
+		_current_u(1) = ((_sp_double_der(1) - _f_hat(1)) / (_lambda)) + torque(1);
 		_current_u(2) = torque(2);
 		_last_u = _current_u;
 		torque = _current_u;
+		//_last_accel_values(0) = angular_accel(0);
+		//_last_accel_values(1) = angular_accel(1);
+
 	}
 
 	pidvalues_s pid_values_storage;
@@ -232,11 +229,11 @@ Vector3f RateControl::update_mfc(const Vector3f &rate, const Vector3f &rate_sp, 
 	pid_values_storage.pitch_i = _rate_int(1);
 	pid_values_storage.yaw_i = _rate_int(2);
 
-	pid_values_storage.roll_f_hat = _f_hat(0);
-	pid_values_storage.pitch_f_hat = _f_hat(1);
+	pid_values_storage.roll_f_hat = _f_hat(0) / (_lambda);
+	pid_values_storage.pitch_f_hat = _f_hat(1) / (_lambda);
 
-	pid_values_storage.roll_sp_der = _sp_double_der(0);
-	pid_values_storage.pitch_sp_der = _sp_double_der(1);
+	pid_values_storage.roll_sp_der = _sp_double_der(0) / ( _lambda);
+	pid_values_storage.pitch_sp_der = _sp_double_der(1) / (_lambda);
 	pid_values_storage.yaw_sp_der = _sp_double_der(2);
 
 	pid_values_storage.dt = _mfc_dt;
@@ -259,27 +256,28 @@ Vector3f RateControl::update_mfc(const Vector3f &rate, const Vector3f &rate_sp, 
 	return torque;
 }
 
-float RateControl::F_hat_F(bool y, bool z, float* _f_measurement, float* _last_f_u){
+float RateControl::F_hat_simpson(float* _f_measurement, float* _last_f_u, float dt){
 
 
 	float Tot_e[_mfc_n];
 	float Tot_o[_mfc_n];
-	_mfc_dt = _time_steps[_mfc_n - 1];
+	_mfc_dt = _mfc_n / 400.0f;
+
 
 	for (int i = 0; i < _mfc_n/2 + 1; i++)
 	{
-		Tot_e[i+1] = 4.0f*F_hat(_time_steps[2*i + 1], y, z, _f_measurement[2*i + 1], _last_f_u[2*i + 1]);
-		Tot_o[i] = 2.0f*F_hat(_time_steps[2*i], y, z, _f_measurement[2*i], _last_f_u[2*i]);
+		Tot_e[i+1] = 4.0f*F_hat(_time_steps[2*i + 1], _f_measurement[2*i + 1], _last_f_u[2*i + 1]);
+		Tot_o[i] = 2.0f*F_hat(_time_steps[2*i], _f_measurement[2*i], _last_f_u[2*i]);
 	}
 
 	Tot_e[0] = 0.0f;
-	Tot_e[_mfc_n/2] = 4.0f*F_hat(_time_steps[1], y, z, _f_measurement[1], _last_f_u[1]);
-	Tot_o[0] = F_hat(_time_steps[0], y, z, _f_measurement[0], _last_f_u[0]);
-	Tot_o[_mfc_n/2] = F_hat(_time_steps[_mfc_n - 1], y, z, _f_measurement[_mfc_n - 1], _last_f_u[_mfc_n - 1]);
+	//Tot_e[_mfc_n/2] = 4.0f*F_hat(_time_steps[1], _f_measurement[1], _last_f_u[1]);
+	//Tot_o[0] = F_hat(_time_steps[0], _f_measurement[0], _last_f_u[0]);
+	//Tot_o[_mfc_n/2] = F_hat(_time_steps[_mfc_n - 1], _f_measurement[_mfc_n - 1], _last_f_u[_mfc_n - 1]);
 	float total = 0.0f;
 
 	for(int k = 0; k < _mfc_n/2 + 1; k++) {
-		total += (Tot_e[k] + Tot_o[k])*(_mfc_dt/3.0f);
+		total += (Tot_e[k] + Tot_o[k])*(dt/3.0f);
 	}
 
 
@@ -287,49 +285,44 @@ float RateControl::F_hat_F(bool y, bool z, float* _f_measurement, float* _last_f
 
 }
 
-float RateControl::F_hat(float x, bool y, bool z, float _f1_measurement, float _last_f1_u){
+float RateControl::F_hat(float x, float _f1_measurement, float _last_f1_u){
 
-	if (y && !z){
 
-		_F_hat_calc = (6/(powf(_mfc_dt,3.0)))*((_mfc_dt - 2*x)*_f1_measurement -  (_lambda * (_mfc_dt - x) * x * _last_f1_u));
+	//_F_hat_calc = (60.0f/(powf(_window_size,5.0f)))*(((powf(_window_size,2.0f) - (6.0f*(_mfc_dt - x))*_window_size + (6.0f* powf((_mfc_dt - x), 2.0f)))*_f1_measurement) -  ((_lambda/2.0f) * powf((_mfc_dt - x), 2.0f) * powf((_window_size - (_mfc_dt - x)), 2.0f) * _last_f1_u));
+	_F_hat_calc = (60.0f/(powf(_mfc_dt,5.0f)))*(((powf(_mfc_dt - x,2.0f) - (4.0f*(_mfc_dt - x))*x + (powf((x), 2.0f)))*_f1_measurement) -  ((_lambda/2.0f) * powf((x), 2.0f) * powf((_mfc_dt - x), 2.0f) * _last_f1_u));
+	return _F_hat_calc;
 
-		return _F_hat_calc;
+}
 
-	}else if(!y && !z) {
+float RateControl::lowpass_filter(float dt, float cutoff_freq)
+{
+    float rc = 1.0f / (2.0f * float(M_PI) * cutoff_freq);
+    return dt / (dt + rc);
+}
 
-		_F_hat_calc = (60.0f/(powf(_mfc_dt,5.0f)))*(((powf(_mfc_dt,2.0f) - (6.0f*(_mfc_dt - x))*_mfc_dt + (6.0f* powf((_mfc_dt - x), 2.0f)))*_f1_measurement) -  ((_lambda/2.0f) * powf((_mfc_dt - x), 2.0f) * powf((_mfc_dt - (_mfc_dt - x)), 2.0f) * _last_f1_u));
+float RateControl::sp_double_dot(float* old_setpoints){
 
-		return _F_hat_calc;
+	//float final_value = ((powf(_window_size, 2) + 2.0f * _window_size + 1.0f) * old_setpoints[0]) - (2.0f * _window_size + 2.0f*powf(_window_size, 2)) * old_setpoints[1] + (powf(_window_size, 2) * old_setpoints[2]);
+	float final_value = (old_setpoints[0] + (2.0f * _window_size + 2.0f*powf(_window_size, 2)) * old_setpoints[1] - (powf(_window_size, 2) * old_setpoints[2]))  /  (powf(_window_size, 2) + 2.0f * _window_size + 1.0f);
 
-	}
-	else if(y && z){
+	return final_value;
 
-		_F_hat_calc = (6.0f/(powf(_mfc_dt,3.0f)))*((_mfc_dt - 2.0f*x) * _f1_measurement);
 
-		return _F_hat_calc;
-
-	}
-	else {
-
-		_F_hat_calc = (60/(powf(_mfc_dt,5.0)))*(((powf(_mfc_dt,2.0) - (6*(_mfc_dt - x))*_mfc_dt + (6* powf((_mfc_dt - x), 2))) * _f1_measurement));
-
-		return _F_hat_calc;
-	}
 }
 
 void RateControl::pop(float* input){
 
 
-	for(int i = 1; i < _mfc_n; i++){
+	for(int i = _mfc_n - 1; i > 0; i--){
 
-		input[i - 1] = input[i];
+		input[i] = input[i - 1];
 	}
 
 }
 
 void RateControl::push(float* input, float value){
 
-	input[_mfc_n - 1] = value;
+	input[0] = value;
 
 }
 
@@ -534,9 +527,9 @@ void RateControl::interval_eq1(const float l1[], const float l2[], const float l
 	scaler_multiplication(addition_2, 1.0f / float(pow(actuator_output_array[0], 2)), multiplication_1);
 	float subtraction_1[2];
 	interval_subtraction(mzaccel, multiplication_1, subtraction_1);
-	/* float lmda_value = constant - ((float(pow(actuator_output_array[1], 2)) + float(pow(actuator_output_array[2], 2)) + float(pow(actuator_output_array[3], 2))) / float(pow(actuator_output_array[0], 2)));
-	_lambda_1[0] = lmda_value / -3.0f;
-	_lambda_1[1] = lmda_value / -3.0f; */
+	//float lmda_value = constant - ((float(pow(actuator_output_array[1], 2)) + float(pow(actuator_output_array[2], 2)) + float(pow(actuator_output_array[3], 2))) / float(pow(actuator_output_array[0], 2)));
+	//_lambda_1[0] = lmda_value / -3;
+	//_lambda_1[1] = lmda_value / -3;
 	interval_intersection(l1, subtraction_1, _lambda_1);
 
 }
@@ -629,88 +622,88 @@ void RateControl::interval_eq4(const float l1[], const float l2[], const float l
 
 void RateControl::update_lambda(float roll_accl, float pitch_accl, float yaw_accl){
 
-	_vehicle_position_sub.copy(&_local_position_values);
-	_actuator_output_sub.update(&_actuator_output_values);
+// 	_vehicle_position_sub.copy(&_local_position_values);
+// 	_actuator_output_sub.copy(&_actuator_output_values);
 
-	/* float old_lambda_2[2] = {_lambda_2[0], _lambda_2[1]};
-	float old_lambda_3[2] = {_lambda_3[0], _lambda_3[1]};
-	float old_lambda_4[2] = {_lambda_4[0], _lambda_4[1]}; */
+// 	/* float old_lambda_2[2] = {_lambda_2[0], _lambda_2[1]};
+// 	float old_lambda_3[2] = {_lambda_3[0], _lambda_3[1]};
+// 	float old_lambda_4[2] = {_lambda_4[0], _lambda_4[1]}; */
 
-	//float lambda_1_temp[2] = {0.0f};
-	//float lambda_2_temp[2] = {0.0f};
-	/* float lambda_3_temp[2] = {0.0f};
-	float lambda_4_temp[2] = {0.0f}; */
-
-
-	float z_accl = _local_position_values.az;
-	//float actuator_output_array[4] = {_actuator_output_values.output[0], _actuator_output_values.output[1], _actuator_output_values.output[2], _actuator_output_values.output[3]};
-	float actuator_output_array[4] = {sum_editable(_actuator_1, 80) / 80.0f, sum_editable(_actuator_2, 80) / 80.0f, sum_editable(_actuator_3, 80) / 80.0f, sum_editable(_actuator_4, 80) / 80.0f};
-
-	/* z_accl = sum_editable(_acc_z_values, 80) / 80.0f;
-	roll_accl = sum_editable(_acc_roll_values, 80) / 80.0f;
-	pitch_accl = sum_editable(_acc_pitch_values, 80) / 80.0f;
-	yaw_accl = sum_editable(_acc_yaw_values, 80) / 80.0f;
- */
-	/* float new_z = (0.8f * z_accl) + (_old_z_accl * 0.2f);
-	float new_roll = (0.8f * roll_accl) + (_old_roll_accl * 0.2f);
-	float new_pitch = (0.8f * pitch_accl) + (_old_pitch_accl * 0.2f);
-	float new_yaw = (0.8f * yaw_accl) + (_old_yaw_accl * 0.2f);
-
-	_old_z_accl = new_z;
-	_old_roll_accl = new_roll;
-	_old_pitch_accl = new_pitch;
-	_old_yaw_accl = new_yaw; */
-
-	float l1[2] = {0.0f};
-	float l2[2] = {0.0f};
-	float l3[2] = {0.0f};
-	float l4[2] = {0.0f};
-
-	//python_implementation(l1, l2, l3, l4, actuator_output_array, z_accl, roll_accl, pitch_accl, yaw_accl);
-	memcpy(l1, &_lambda_1, sizeof(_lambda_1));
-	memcpy(l2, &_lambda_2, sizeof(_lambda_1));
-	memcpy(l3, &_lambda_3, sizeof(_lambda_1));
-	memcpy(l4, &_lambda_4, sizeof(_lambda_1));
-	interval_eq1(l1, l2, l3, l4, actuator_output_array, z_accl);
-
-	memcpy(l1, &_lambda_1, sizeof(_lambda_1));
-	interval_eq2(l1, l2, l3, l4, actuator_output_array, roll_accl);
-
-	memcpy(l2, &_lambda_2, sizeof(_lambda_1));
-	interval_eq3(l1, l2, l3, l4, actuator_output_array, pitch_accl);
-
-	memcpy(l3, &_lambda_3, sizeof(_lambda_1));
-	interval_eq4(l1, l2, l3, l4, actuator_output_array, yaw_accl);
-
-	// publish the data to lambda uorb topic
-	adaptivecontrollambda_s lambda_values_storage;
-
-	lambda_values_storage.timestamp = hrt_absolute_time();
-	lambda_values_storage.lambda_1 = interval_mid_value(_lambda_1);
-	lambda_values_storage.lambda_2 = interval_mid_value(_lambda_2);// (0.9f * _lambda_2_old) + (interval_mid_value(_lambda_2) / 10.0f);
-	lambda_values_storage.lambda_3 = interval_mid_value(_lambda_3); //(0.9f * _lambda_3_old) + (interval_mid_value(_lambda_3) / 10.0f);
-	lambda_values_storage.lambda_4 = interval_mid_value(_lambda_4); //((1.0f - (1.0f/3.0f)) * _lambda_4_old) + (interval_mid_value(_lambda_4) / 3.0f);
-
-	lambda_values_storage.interval_1[0] = _lambda_1[0];
-	lambda_values_storage.interval_1[1] = _lambda_1[1];
-	lambda_values_storage.interval_2[0] = _lambda_2[0];
-	lambda_values_storage.interval_2[1] = _lambda_2[1];
-	lambda_values_storage.interval_3[0] = _lambda_3[0];
-	lambda_values_storage.interval_3[1] = _lambda_3[1];
-	lambda_values_storage.interval_4[0] = _lambda_4[0];
-	lambda_values_storage.interval_4[1] = _lambda_4[1];
+// 	//float lambda_1_temp[2] = {0.0f};
+// 	//float lambda_2_temp[2] = {0.0f};
+// 	/* float lambda_3_temp[2] = {0.0f};
+// 	float lambda_4_temp[2] = {0.0f}; */
 
 
-	_lambda_1_old = lambda_values_storage.lambda_1;
-	_lambda_2_old = lambda_values_storage.lambda_2;
-	_lambda_3_old = lambda_values_storage.lambda_3;
-	_lambda_4_old = lambda_values_storage.lambda_4;
+// 	float z_accl = _local_position_values.az;
+// 	float actuator_output_array[4] = {float(_actuator_output_values.esc[0].esc_rpm), float(_actuator_output_values.esc[1].esc_rpm), float(_actuator_output_values.esc[2].esc_rpm), float(_actuator_output_values.esc[3].esc_rpm)};
+// 	//float actuator_output_array[4] = {sum_editable(_actuator_1, 4) / 4.0f, sum_editable(_actuator_2, 4) / 4.0f, sum_editable(_actuator_3, 4) / 4.0f, sum_editable(_actuator_4, 4) / 4.0f};
 
-	/* lambda_values_storage.lambda_1 = new_z; //interval_mid_value(_lambda_1);
-	lambda_values_storage.lambda_2 = new_roll; //interval_mid_value(_lambda_2);
-	lambda_values_storage.lambda_3 = new_pitch; //interval_mid_value(_lambda_3);
-	lambda_values_storage.lambda_4 = new_yaw; //interval_mid_value(_lambda_4); */
-	_adaptive_control_pub.publish(lambda_values_storage);
+// 	/* z_accl = sum_editable(_acc_z_values, 80) / 80.0f;
+// 	roll_accl = sum_editable(_acc_roll_values, 80) / 80.0f;
+// 	pitch_accl = sum_editable(_acc_pitch_values, 80) / 80.0f;
+// 	yaw_accl = sum_editable(_acc_yaw_values, 80) / 80.0f;
+//  */
+// 	/* float new_z = (0.8f * z_accl) + (_old_z_accl * 0.2f);
+// 	float new_roll = (0.8f * roll_accl) + (_old_roll_accl * 0.2f);
+// 	float new_pitch = (0.8f * pitch_accl) + (_old_pitch_accl * 0.2f);
+// 	float new_yaw = (0.8f * yaw_accl) + (_old_yaw_accl * 0.2f);
+
+// 	_old_z_accl = new_z;
+// 	_old_roll_accl = new_roll;
+// 	_old_pitch_accl = new_pitch;
+// 	_old_yaw_accl = new_yaw; */
+
+// 	float l1[2] = {0.0f};
+// 	float l2[2] = {0.0f};
+// 	float l3[2] = {0.0f};
+// 	float l4[2] = {0.0f};
+
+// 	//python_implementation(l1, l2, l3, l4, actuator_output_array, z_accl, roll_accl, pitch_accl, yaw_accl);
+// 	memcpy(l1, &_lambda_1, sizeof(_lambda_1));
+// 	memcpy(l2, &_lambda_2, sizeof(_lambda_1));
+// 	memcpy(l3, &_lambda_3, sizeof(_lambda_1));
+// 	memcpy(l4, &_lambda_4, sizeof(_lambda_1));
+// 	interval_eq1(l1, l2, l3, l4, actuator_output_array, z_accl);
+
+// 	memcpy(l1, &_lambda_1, sizeof(_lambda_1));
+// 	interval_eq2(l1, l2, l3, l4, actuator_output_array, roll_accl);
+
+// 	memcpy(l2, &_lambda_2, sizeof(_lambda_1));
+// 	interval_eq3(l1, l2, l3, l4, actuator_output_array, pitch_accl);
+
+// 	memcpy(l3, &_lambda_3, sizeof(_lambda_1));
+// 	interval_eq4(l1, l2, l3, l4, actuator_output_array, yaw_accl);
+
+// 	// publish the data to lambda uorb topic
+// 	adaptivecontrollambda_s lambda_values_storage;
+
+// 	lambda_values_storage.timestamp = hrt_absolute_time();
+// 	lambda_values_storage.lambda_1 = interval_mid_value(_lambda_1);
+// 	lambda_values_storage.lambda_2 = interval_mid_value(_lambda_2);// (0.9f * _lambda_2_old) + (interval_mid_value(_lambda_2) / 10.0f);
+// 	lambda_values_storage.lambda_3 = interval_mid_value(_lambda_3); //(0.9f * _lambda_3_old) + (interval_mid_value(_lambda_3) / 10.0f);
+// 	lambda_values_storage.lambda_4 = interval_mid_value(_lambda_4); //((1.0f - (1.0f/3.0f)) * _lambda_4_old) + (interval_mid_value(_lambda_4) / 3.0f);
+
+// 	lambda_values_storage.interval_1[0] = _lambda_1[0];
+// 	lambda_values_storage.interval_1[1] = _lambda_1[1];
+// 	lambda_values_storage.interval_2[0] = _lambda_2[0];
+// 	lambda_values_storage.interval_2[1] = _lambda_2[1];
+// 	lambda_values_storage.interval_3[0] = _lambda_3[0];
+// 	lambda_values_storage.interval_3[1] = _lambda_3[1];
+// 	lambda_values_storage.interval_4[0] = _lambda_4[0];
+// 	lambda_values_storage.interval_4[1] = _lambda_4[1];
+
+
+// 	// _lambda_1_old = lambda_values_storage.lambda_1;
+// 	// _lambda_2_old = lambda_values_storage.lambda_2;
+// 	// _lambda_3_old = lambda_values_storage.lambda_3;
+// 	// _lambda_4_old = lambda_values_storage.lambda_4;
+
+// 	/* lambda_values_storage.lambda_1 = new_z; //interval_mid_value(_lambda_1);
+// 	lambda_values_storage.lambda_2 = new_roll; //interval_mid_value(_lambda_2);
+// 	lambda_values_storage.lambda_3 = new_pitch; //interval_mid_value(_lambda_3);
+// 	lambda_values_storage.lambda_4 = new_yaw; //interval_mid_value(_lambda_4); */
+// 	_adaptive_control_pub.publish(lambda_values_storage);
 
 }
 
@@ -735,7 +728,7 @@ void RateControl::updateIntegral(Vector3f &rate_error, const float dt)
 		// with the parameter set to 400 degrees, up to 100 deg rate error, i_factor is almost 1 (having no effect),
 		// and up to 200 deg error leads to <25% reduction of I.
 		float i_factor = rate_error(i) / math::radians(400.f);
-		i_factor = math::max(0.0f, 1.f - i_factor * i_factor);
+		i_factor = 1.0f; //math::max(0.0f, 1.f - i_factor * i_factor);
 
 		// if mfc is running use the mfc gain for i
 		if (_rc_channel_values.channels[4] > -1.0f){

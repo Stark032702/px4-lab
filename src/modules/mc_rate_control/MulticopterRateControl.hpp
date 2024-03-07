@@ -162,7 +162,7 @@ private:
 		(ParamBool<px4::params::MC_BAT_SCALE_EN>) _param_mc_bat_scale_en,
 
 		(ParamFloat<px4::params::MC_MFC_L>) _param_mc_rollrate_lambda,
-		(ParamFloat<px4::params::MC_MFC_GF>) _param_mc_rollrate_gain_f_hat,
+		(ParamFloat<px4::params::MC_MFC_T>) _param_mc_rollrate_T,
 		(ParamFloat<px4::params::MC_MFC_GS>) _param_mc_rollrate_gain_sp_der,
 		(ParamInt<px4::params::MC_MFC_N>) _param_mc_rollrate_mfc_n,
 

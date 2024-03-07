@@ -402,20 +402,20 @@ PARAM_DEFINE_INT32(MC_BAT_SCALE_EN, 0);
  * Lambda for MFC
  *
  * @min 0.01
- * @max 1000
+ * @max 5000
  * @decimal 3
  * @increment 0.01
  * @group Multicopter Rate Control
  */
-PARAM_DEFINE_FLOAT(MC_MFC_L, 0.7f);
+PARAM_DEFINE_FLOAT(MC_MFC_L, 320.0f);
 
 /**
- * Fhat gain for MFC
+ * Moving time horizon for MFC
  *
- * @decimal 10
+ * @decimal 2
  * @group Multicopter Rate Control
  */
-PARAM_DEFINE_FLOAT(MC_MFC_GF, 0.7f);
+PARAM_DEFINE_FLOAT(MC_MFC_T, 1.0f);
 
 /**
  * Set point derivative gain for MFC
@@ -423,7 +423,7 @@ PARAM_DEFINE_FLOAT(MC_MFC_GF, 0.7f);
  * @decimal 10
  * @group Multicopter Rate Control
  */
-PARAM_DEFINE_FLOAT(MC_MFC_GS, 1f);
+PARAM_DEFINE_FLOAT(MC_MFC_GS, 1.0f);
 
 /**
  * N value for Simpson's rule MFC
@@ -431,7 +431,7 @@ PARAM_DEFINE_FLOAT(MC_MFC_GS, 1f);
  * @min 1
  * @group Multicopter Rate Control
  */
-PARAM_DEFINE_INT32(MC_MFC_N, 22);
+PARAM_DEFINE_INT32(MC_MFC_N, 25);
 
 /**
  * Roll rate P gain for MFC
